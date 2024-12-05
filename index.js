@@ -1,39 +1,42 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
+const socketIo = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = socketIo(server);
 
-// Serve static files
-app.use(express.static("public"));
+let usersInRoom = {};
 
-// Handle incoming socket connections
 io.on("connection", (socket) => {
-  console.log("A user connected");
+  console.log("New connection:", socket.id);
 
-  // Handle room creation
   socket.on("create-room", (roomId) => {
     socket.join(roomId);
-    console.log(`Room ${roomId} created`);
-    socket.emit("room-created", roomId);  // Send confirmation to the host
+    usersInRoom[roomId] = (usersInRoom[roomId] || 0) + 1;
+    console.log(`${socket.id} created room: ${roomId}`);
   });
 
-  // Handle joining a room
   socket.on("join-room", (roomId, username) => {
     socket.join(roomId);
-    console.log(`${username} joined room ${roomId}`);
-    socket.to(roomId).emit("user-joined", username);  // Notify other users
+    io.to(roomId).emit("user-joined", username);
+    console.log(`${username} joined room: ${roomId}`);
   });
 
-  // Handle leaving the room
+  socket.on("chat-message", (message) => {
+    io.emit("chat-message", message);  // Broadcast message
+  });
+
+  socket.on("share-screen", (screenStream) => {
+    socket.broadcast.emit("screen-shared", screenStream);
+    console.log("Screen shared");
+  });
+
   socket.on("disconnect", () => {
-    console.log("A user disconnected");
+    console.log("User disconnected");
   });
 });
 
-// Start the server
 server.listen(5000, () => {
-  console.log("Server is running on http://localhost:5000");
+  console.log("Server is running on port 5000");
 });
