@@ -1,68 +1,63 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
 
-const rooms = {}; // Stores room details: { roomId: [{ id, username }] }
+let rooms = {}; // Stores room data
 
 io.on("connection", (socket) => {
-  console.log("New client connected:", socket.id);
+  console.log("A user connected:", socket.id);
 
-  // Joining a room
-  socket.on("join-room", (roomId, username) => {
+  // Handle joining a room
+  socket.on("join-room", ({ roomId, username }) => {
+    if (!rooms[roomId]) {
+      rooms[roomId] = [];
+    }
+
+    rooms[roomId].push({ id: socket.id, username });
     socket.join(roomId);
 
-    // Add user to the room
-    if (!rooms[roomId]) rooms[roomId] = [];
-    rooms[roomId].push({ id: socket.id, username });
-
     console.log(`User ${username} joined room ${roomId}`);
-    console.log("Current rooms:", rooms);
 
-    // Notify all users in the room about the updated participants
+    // Notify all participants in the room
     io.to(roomId).emit(
       "participants-update",
       rooms[roomId].map((user) => user.username)
     );
+  });
 
-    // Handle video stream
-    socket.on("send-video-stream", (stream) => {
-      socket.broadcast.to(roomId).emit("receive-video-stream", {
-        userId: socket.id,
-        stream,
-      });
-    });
+  // Handle sending messages
+  socket.on("send-message", ({ roomId, message, username }) => {
+    io.to(roomId).emit("receive-message", { username, message });
+  });
 
-    // Handle chat messages
-    socket.on("send-message", (message) => {
-      io.to(roomId).emit("receive-message", message);
-    });
+  // Handle screen sharing
+  socket.on("share-screen", ({ roomId, streamId }) => {
+    io.to(roomId).emit("screen-shared", { streamId });
+  });
 
-    // Screen sharing
-    socket.on("share-screen", (screenStream) => {
-      socket.broadcast.to(roomId).emit("screen-share-receive", {
-        userId: socket.id,
-        screenStream,
-      });
-    });
-
-    // Handle disconnect
-    socket.on("disconnect", () => {
-      console.log(`User disconnected: ${socket.id}`);
-
-      // Remove user from the room
+  // Handle disconnection
+  socket.on("disconnect", () => {
+    console.log(`User disconnected: ${socket.id}`);
+    for (let roomId in rooms) {
       rooms[roomId] = rooms[roomId].filter((user) => user.id !== socket.id);
-
-      // Notify the remaining users
       io.to(roomId).emit(
         "participants-update",
         rooms[roomId].map((user) => user.username)
       );
-    });
+    }
   });
 });
 
-server.listen(5000, () => console.log("Server running on port 5000"));
+server.listen(5000, () => {
+  console.log("Server is running on port 5000");
+});
