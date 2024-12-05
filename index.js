@@ -1,42 +1,46 @@
 const express = require("express");
 const http = require("http");
-const socketIo = require("socket.io");
+const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = new Server(server);
 
-let usersInRoom = {};
+const rooms = {};
 
 io.on("connection", (socket) => {
-  console.log("New connection:", socket.id);
-
-  socket.on("create-room", (roomId) => {
-    socket.join(roomId);
-    usersInRoom[roomId] = (usersInRoom[roomId] || 0) + 1;
-    console.log(`${socket.id} created room: ${roomId}`);
-  });
+  console.log("New client connected:", socket.id);
 
   socket.on("join-room", (roomId, username) => {
     socket.join(roomId);
-    io.to(roomId).emit("user-joined", username);
-    console.log(`${username} joined room: ${roomId}`);
-  });
 
-  socket.on("chat-message", (message) => {
-    io.emit("chat-message", message);  // Broadcast message
-  });
+    if (!rooms[roomId]) rooms[roomId] = [];
+    rooms[roomId].push({ id: socket.id, username });
 
-  socket.on("share-screen", (screenStream) => {
-    socket.broadcast.emit("screen-shared", screenStream);
-    console.log("Screen shared");
-  });
+    io.to(roomId).emit(
+      "participants-update",
+      rooms[roomId].map((user) => user.username)
+    );
 
-  socket.on("disconnect", () => {
-    console.log("User disconnected");
+    socket.on("send-message", ({ roomId, username, message }) => {
+      io.to(roomId).emit("receive-message", `${username}: ${message}`);
+    });
+
+    socket.on("share-screen", ({ roomId, screenStream }) => {
+      socket.broadcast.to(roomId).emit("receive-video-stream", {
+        userId: socket.id,
+        streamId: screenStream,
+      });
+    });
+
+    socket.on("disconnect", () => {
+      rooms[roomId] = rooms[roomId].filter((user) => user.id !== socket.id);
+      io.to(roomId).emit(
+        "participants-update",
+        rooms[roomId].map((user) => user.username)
+      );
+    });
   });
 });
 
-server.listen(5000, () => {
-  console.log("Server is running on port 5000");
-});
+server.listen(5000, () => console.log("Server running on port 5000"));
