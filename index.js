@@ -1,59 +1,39 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { v4: uuidv4 } = require("uuid");
-const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const activeRooms = {};
+// Serve static files
+app.use(express.static("public"));
 
-app.use(express.static(path.join(__dirname, "../client/dist")));
-
+// Handle incoming socket connections
 io.on("connection", (socket) => {
-    let currentRoom = null;
+  console.log("A user connected");
 
-    socket.on("create-room", () => {
-        const roomId = uuidv4();
-        activeRooms[roomId] = { host: socket.id, participants: [] };
-        socket.emit("room-created", roomId);
-    });
+  // Handle room creation
+  socket.on("create-room", (roomId) => {
+    socket.join(roomId);
+    console.log(`Room ${roomId} created`);
+    socket.emit("room-created", roomId);  // Send confirmation to the host
+  });
 
-    socket.on("join-room", ({ roomId, name }) => {
-        if (activeRooms[roomId]) {
-            currentRoom = roomId;
-            activeRooms[roomId].participants.push({ id: socket.id, name });
-            socket.join(roomId);
-            io.to(roomId).emit("user-joined", { id: socket.id, name });
-        } else {
-            socket.emit("room-not-found");
-        }
-    });
+  // Handle joining a room
+  socket.on("join-room", (roomId, username) => {
+    socket.join(roomId);
+    console.log(`${username} joined room ${roomId}`);
+    socket.to(roomId).emit("user-joined", username);  // Notify other users
+  });
 
-    socket.on("signal", (data) => {
-        io.to(data.to).emit("signal", data);
-    });
-
-    socket.on("chat-message", (message) => {
-        io.to(currentRoom).emit("chat-message", message);
-    });
-
-    socket.on("disconnect", () => {
-        if (currentRoom && activeRooms[currentRoom]) {
-            activeRooms[currentRoom].participants = activeRooms[currentRoom].participants.filter(p => p.id !== socket.id);
-            io.to(currentRoom).emit("user-left", socket.id);
-
-            if (activeRooms[currentRoom].participants.length === 0) {
-                delete activeRooms[currentRoom];
-            }
-        }
-    });
+  // Handle leaving the room
+  socket.on("disconnect", () => {
+    console.log("A user disconnected");
+  });
 });
 
-app.get("*", (req, res) => {
-    res.sendFile(path.resolve(__dirname, "../client/dist/index.html"));
+// Start the server
+server.listen(5000, () => {
+  console.log("Server is running on http://localhost:5000");
 });
-
-server.listen(3000, () => console.log("Server running on http://localhost:3000"));
